@@ -26,7 +26,6 @@ class SharedScopeProvider : ContentProvider() {
         private val SHA_256_CHARS by lazy { CharArray(64) }
         private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
         private val MESSAGE_DIGEST by lazy { MessageDigest.getInstance("SHA-256") }
-
         private val ASYNC_THREAD by lazy { HandlerThread(SharedScopeCache.TAG).apply { start() } }
 
         // Taken from:
