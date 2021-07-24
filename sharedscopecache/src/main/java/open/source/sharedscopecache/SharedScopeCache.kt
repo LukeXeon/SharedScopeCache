@@ -11,7 +11,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
 
-class SharedScopeCache(context: Context) {
+class SharedScopeCache private constructor(context: Context) {
 
     companion object {
         private const val MAGIC_NAME = "shared_scope_cache"
