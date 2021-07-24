@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
 import android.os.Process
+import android.util.Log
 import open.source.sharedscopecache.disk.DiskLruCache
 import open.source.sharedscopecache.http.NanoHTTPD
 import java.io.File
@@ -25,6 +26,7 @@ class SharedScopeCache(context: Context) {
         private val MESSAGE_DIGEST = MessageDigest.getInstance("SHA-256")
         private val HEX_CHAR_ARRAY = "0123456789abcdef".toCharArray()
         private var instance: SharedScopeCache? = null
+        private const val TAG = "SharedScopeCache"
 
         // Taken from:
         // http://stackoverflow.com/questions/9655181/convert-from-byte-array-to-hex-string-in-java
@@ -86,6 +88,7 @@ class SharedScopeCache(context: Context) {
                         if (!key.isNullOrEmpty()) {
                             val file = diskLruCache.get(key)
                                 .getFile(0)
+                            Log.d(TAG, "response:" + file.absoluteFile)
                             return newFixedLengthResponse(
                                 Response.Status.OK,
                                 MIME_TYPE,
@@ -104,8 +107,11 @@ class SharedScopeCache(context: Context) {
     fun append(data: ByteArray): String {
         val key = generateKey(data)
         diskLruCache.edit(key).apply {
-            getFile(0).writeBytes(data)
+            getFile(0).apply {
+                writeBytes(data)
+            }
             commit()
+            Log.d(TAG, "append:" + getFile(0).absoluteFile)
         }
         return Uri.parse("http://localhost:${cacheService.listeningPort}/${MAGIC_NAME}")
             .buildUpon()
