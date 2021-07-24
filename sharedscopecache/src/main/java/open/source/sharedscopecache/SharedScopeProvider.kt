@@ -4,10 +4,13 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
 import open.source.sharedscopecache.disk.DiskLruCache
 import open.source.sharedscopecache.http.NanoHTTPD
 import java.io.File
+import java.io.FileInputStream
 import java.security.MessageDigest
 
 
@@ -16,11 +19,14 @@ class SharedScopeProvider : ContentProvider() {
     companion object {
         private const val APP_VERSION = 1
         private const val VALUE_COUNT = 1
+        private const val MIME_TYPE = "application/octet-stream"
         private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
         private val GENERATE_KEY_LOCK = Any()
         private val SHA_256_CHARS by lazy { CharArray(64) }
         private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
         private val MESSAGE_DIGEST by lazy { MessageDigest.getInstance("SHA-256") }
+
+        private val ASYNC_THREAD by lazy { HandlerThread(SharedScopeCache.TAG).apply { start() } }
 
         // Taken from:
         // http://stackoverflow.com/questions/9655181/convert-from-byte-array-to-hex-string-in-java
@@ -44,14 +50,28 @@ class SharedScopeProvider : ContentProvider() {
 
     }
 
+    private class HandlerRunner : Handler(ASYNC_THREAD.looper), NanoHTTPD.AsyncRunner {
+        override fun closeAll() {
+            removeCallbacksAndMessages(null)
+        }
+
+        override fun closed(clientHandler: NanoHTTPD.ClientHandler) {
+            removeCallbacks(clientHandler)
+        }
+
+        override fun exec(code: NanoHTTPD.ClientHandler) {
+            post(code)
+        }
+    }
+
     private val diskLruCache by lazy {
         DiskLruCache.open(
             context?.cacheDir ?: File(
-                    System.getProperty(
-                        "java.io.tmpdir",
-                        "."
-                    ) ?: "."
-                ),
+                System.getProperty(
+                    "java.io.tmpdir",
+                    "."
+                ) ?: "."
+            ),
             APP_VERSION,
             VALUE_COUNT,
             DEFAULT_MAX_SIZE
@@ -80,17 +100,41 @@ class SharedScopeProvider : ContentProvider() {
 
     override fun insert(uri: Uri, values: ContentValues?): Uri? {
         val data = values?.getAsByteArray(SharedScopeCache.DATA_PARAMETER) ?: return null
-        val server = synchronized(serverLock) {
-            var s = server
-            if (s == null) {
+        val serverInstance = synchronized(serverLock) {
+            var newInstance = server
+            if (newInstance == null) {
                 try {
-                    s = SharedScopeServer(diskLruCache).apply { start() }
+                    newInstance = object : NanoHTTPD(0) {
+                        override fun serve(session: IHTTPSession?): Response {
+                            if (session != null && session.method == Method.GET) {
+                                if (session.uri.endsWith(SharedScopeCache.MAGIC_NAME)) {
+                                    val key =
+                                        session.parameters[SharedScopeCache.KEY_PARAMETER]?.firstOrNull()
+                                    if (!key.isNullOrEmpty()) {
+                                        val file = diskLruCache.get(key)
+                                            .getFile(0)
+                                        Log.d(SharedScopeCache.TAG, "response:" + file.absoluteFile)
+                                        return newFixedLengthResponse(
+                                            Response.Status.OK,
+                                            MIME_TYPE,
+                                            FileInputStream(file),
+                                            file.length()
+                                        )
+                                    }
+                                }
+                            }
+                            return super.serve(session)
+                        }
+                    }.apply {
+                        setAsyncRunner(HandlerRunner())
+                        start()
+                    }
                 } catch (e: Throwable) {
                     Log.d(SharedScopeCache.TAG, e.toString())
                 }
             }
-            server = s
-            return@synchronized s
+            server = newInstance
+            return@synchronized newInstance
         } ?: return null
         val key = generateKey(data)
         diskLruCache.edit(key).apply {
@@ -100,7 +144,7 @@ class SharedScopeProvider : ContentProvider() {
             commit()
         }
         Log.d(SharedScopeCache.TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
-        return Uri.parse("http://localhost:${server.listeningPort}/${SharedScopeCache.MAGIC_NAME}")
+        return Uri.parse("http://localhost:${serverInstance.listeningPort}/${SharedScopeCache.MAGIC_NAME}")
             .buildUpon()
             .appendQueryParameter(SharedScopeCache.KEY_PARAMETER, key)
             .build()
