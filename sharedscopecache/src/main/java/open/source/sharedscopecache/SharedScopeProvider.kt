@@ -1,7 +1,9 @@
 package open.source.sharedscopecache
 
+import android.content.ComponentName
 import android.content.ContentProvider
 import android.content.ContentValues
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Handler
@@ -22,6 +24,7 @@ class SharedScopeProvider : ContentProvider() {
         private const val MIME_TYPE = "application/octet-stream"
         private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
         private const val KEY_PARAMETER = "key"
+        private const val MAX_SIZE_KEY = "max_size"
         private val GENERATE_KEY_LOCK = Any()
         private val SHA_256_CHARS by lazy { CharArray(64) }
         private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
@@ -65,16 +68,25 @@ class SharedScopeProvider : ContentProvider() {
     }
 
     private val diskLruCache by lazy {
+        val maxSize = context?.run {
+            packageManager.getProviderInfo(
+                ComponentName(
+                    this,
+                    SharedScopeProvider::class.java
+                ), PackageManager.GET_META_DATA
+            )
+        }?.metaData?.getLong(MAX_SIZE_KEY, DEFAULT_MAX_SIZE) ?: DEFAULT_MAX_SIZE
+        val dir = context?.cacheDir ?: File(
+            System.getProperty(
+                "java.io.tmpdir",
+                "."
+            ) ?: "."
+        )
         DiskLruCache.open(
-            context?.cacheDir ?: File(
-                System.getProperty(
-                    "java.io.tmpdir",
-                    "."
-                ) ?: "."
-            ),
+            dir,
             APP_VERSION,
             VALUE_COUNT,
-            DEFAULT_MAX_SIZE
+            maxSize
         )
     }
     private val serverLock = Any()
