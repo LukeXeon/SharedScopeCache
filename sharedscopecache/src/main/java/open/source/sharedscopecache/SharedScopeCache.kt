@@ -1,61 +1,30 @@
 package open.source.sharedscopecache
 
-import android.content.ContentProvider
-import android.content.ContentValues
+import android.app.ActivityManager
 import android.content.Context
-import android.database.Cursor
-import android.database.MatrixCursor
 import android.net.Uri
+import android.os.Process
+import open.source.sharedscopecache.disk.DiskLruCache
+import open.source.sharedscopecache.http.NanoHTTPD
 import java.io.File
+import java.io.FileInputStream
 import java.security.MessageDigest
 
-class SharedScopeCache : ContentProvider() {
+class SharedScopeCache(context: Context) {
 
     companion object {
-        private const val DATA_PARAMETER = "DATA"
         private const val MAGIC_NAME = "shared_scope_cache"
         private const val KEY_PARAMETER = "key"
+        private const val MIME_TYPE = ""
         private const val APP_VERSION = 1
         private const val VALUE_COUNT = 1
         private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
         private val GENERATE_KEY_LOCK = Any()
+        private val INSTANCE_LOCK = Any()
         private val SHA_256_CHARS = CharArray(64)
         private val MESSAGE_DIGEST = MessageDigest.getInstance("SHA-256")
         private val HEX_CHAR_ARRAY = "0123456789abcdef".toCharArray()
-        private val COLUMN_NAMES = arrayOf(DATA_PARAMETER)
-        private var application: Context? = null
-
-        @JvmStatic
-        fun save(bytes: ByteArray): Uri? {
-            val application = application ?: return null
-            val uri = Uri.parse("content://${application.packageName}.${MAGIC_NAME}")
-            return application.contentResolver.insert(uri, ContentValues().apply {
-                put(DATA_PARAMETER, bytes)
-            })
-        }
-
-        @JvmStatic
-        fun load(uri: Uri): ByteArray? {
-            val application = application ?: return null
-            if (uri.host?.endsWith(MAGIC_NAME) == true) {
-                val cursor = application.contentResolver.query(
-                    uri,
-                    null,
-                    null,
-                    null,
-                    null
-                )
-                if (cursor != null) {
-                    cursor.moveToFirst()
-                    val data = cursor.run {
-                        if (isNull(0)) null else getBlob(0)
-                    }
-                    cursor.close()
-                    return data
-                }
-            }
-            return null
-        }
+        private var instance: SharedScopeCache? = null
 
         // Taken from:
         // http://stackoverflow.com/questions/9655181/convert-from-byte-array-to-hex-string-in-java
@@ -76,85 +45,73 @@ class SharedScopeCache : ContentProvider() {
             }
         }
 
-    }
-
-    private var diskLruCache: DiskLruCache? = null
-
-    override fun onCreate(): Boolean {
-        val context = context?.applicationContext
-        if (context != null) {
-            application = context
-            diskLruCache = DiskLruCache.open(
-                File(context.cacheDir, MAGIC_NAME),
-                APP_VERSION,
-                VALUE_COUNT,
-                DEFAULT_MAX_SIZE
-            )
-            return false
-        }
-        return true
-    }
-
-    override fun query(
-        uri: Uri,
-        projection: Array<out String>?,
-        selection: String?,
-        selectionArgs: Array<out String>?,
-        sortOrder: String?
-    ): Cursor? {
-        val diskLruCache = diskLruCache ?: return null
-        val key = uri.getQueryParameter(KEY_PARAMETER) ?: return null
-        return try {
-            val bytes = diskLruCache
-                .get(key)
-                .getFile(0)
-                .readBytes()
-            MatrixCursor(COLUMN_NAMES, 1).apply {
-                addRow(arrayOf(bytes))
+        @JvmStatic
+        fun getInstance(context: Context): SharedScopeCache {
+            synchronized(INSTANCE_LOCK) {
+                var i = instance
+                if (i == null) {
+                    i = SharedScopeCache(context)
+                    instance = i
+                }
+                return i
             }
-        } catch (e: Throwable) {
-            e.printStackTrace()
-            null
         }
     }
 
-    override fun getType(uri: Uri): String? {
-        return null
-    }
+    private val diskLruCache: DiskLruCache
+    private val cacheService: NanoHTTPD
 
-    override fun insert(uri: Uri, values: ContentValues?): Uri? {
-        values ?: return null
-        val diskLruCache = diskLruCache ?: return null
-        val data = values.getAsByteArray(DATA_PARAMETER) ?: return null
-        return try {
-            val key = generateKey(data)
-            diskLruCache.edit(key).apply {
-                getFile(0).writeBytes(data)
-                commit()
+    init {
+        val activityManager = context
+            .getSystemService(Context.ACTIVITY_SERVICE)
+                as ActivityManager
+        val myPid = Process.myPid()
+        val process = activityManager
+            .runningAppProcesses
+            .find { it.pid == myPid }!!
+        diskLruCache = DiskLruCache.open(
+            File(
+                context.cacheDir,
+                "${MAGIC_NAME}${File.separator}${process.processName}"
+            ),
+            APP_VERSION,
+            VALUE_COUNT,
+            DEFAULT_MAX_SIZE
+        )
+        cacheService = object : NanoHTTPD(0) {
+            override fun serve(session: IHTTPSession?): Response {
+                if (session != null && session.method == Method.GET) {
+                    if (session.uri.endsWith(MAGIC_NAME)) {
+                        val key = session.parameters[KEY_PARAMETER]?.firstOrNull()
+                        if (!key.isNullOrEmpty()) {
+                            val file = diskLruCache.get(key)
+                                .getFile(0)
+                            return newFixedLengthResponse(
+                                Response.Status.OK,
+                                MIME_TYPE,
+                                FileInputStream(file),
+                                file.length()
+                            )
+                        }
+                    }
+                }
+                return super.serve(session)
             }
-            uri.buildUpon()
-                .appendQueryParameter(KEY_PARAMETER, key)
-                .build()
-        } catch (e: Throwable) {
-            e.printStackTrace()
-            null
         }
+        cacheService.start()
     }
 
-    override fun delete(
-        uri: Uri,
-        selection: String?,
-        selectionArgs: Array<out String>?
-    ): Int {
-        return 0
+    fun append(data: ByteArray): String {
+        val key = generateKey(data)
+        diskLruCache.edit(key).apply {
+            getFile(0).writeBytes(data)
+            commit()
+        }
+        return Uri.parse("http://localhost:${cacheService.listeningPort}/${MAGIC_NAME}")
+            .buildUpon()
+            .appendQueryParameter(KEY_PARAMETER, key)
+            .build()
+            .toString()
     }
 
-    override fun update(
-        uri: Uri,
-        values: ContentValues?,
-        selection: String?,
-        selectionArgs: Array<out String>?
-    ): Int {
-        return 0
-    }
 }

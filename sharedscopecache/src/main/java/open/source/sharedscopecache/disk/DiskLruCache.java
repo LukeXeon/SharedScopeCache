@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package open.source.sharedscopecache;
+package open.source.sharedscopecache.disk;
 
 import android.annotation.TargetApi;
 import android.os.Build.VERSION;

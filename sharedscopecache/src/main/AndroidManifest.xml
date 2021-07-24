@@ -2,23 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     package="open.source.sharedscopecache">
-    <permission
-        android:name="${applicationId}.WRITE_SHARED_SCOPE_CACHE"
-        android:protectionLevel="signature"/>
-    <uses-permission android:name="${applicationId}.WRITE_SHARED_SCOPE_CACHE"/>
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
-        tools:ignore="QueryAllPackagesPermission" />
-    <application>
-        <provider
-            android:enabled="true"
-            android:multiprocess="false"
-            android:exported="true"
-            android:grantUriPermissions="true"
-            android:readPermission="@null"
-            android:writePermission="${applicationId}.WRITE_SHARED_SCOPE_CACHE"
-            android:name=".SharedScopeCache"
-            android:authorities="${applicationId}.shared_scope_cache" >
-        </provider>
-
-    </application>
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 </manifest>
