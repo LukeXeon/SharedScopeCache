@@ -1,9 +1,7 @@
 package open.source.sharedscopecache
 
-import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
-import android.os.Process
 import android.util.Log
 import open.source.sharedscopecache.disk.DiskLruCache
 import open.source.sharedscopecache.http.NanoHTTPD
@@ -64,18 +62,8 @@ class SharedScopeCache(context: Context) {
     private val cacheService: NanoHTTPD
 
     init {
-        val activityManager = context
-            .getSystemService(Context.ACTIVITY_SERVICE)
-                as ActivityManager
-        val myPid = Process.myPid()
-        val process = activityManager
-            .runningAppProcesses
-            .find { it.pid == myPid }!!
         diskLruCache = DiskLruCache.open(
-            File(
-                context.cacheDir,
-                "${MAGIC_NAME}${File.separator}${process.processName}"
-            ),
+            File(context.cacheDir, MAGIC_NAME),
             APP_VERSION,
             VALUE_COUNT,
             DEFAULT_MAX_SIZE
