@@ -21,6 +21,7 @@ class SharedScopeProvider : ContentProvider() {
         private const val VALUE_COUNT = 1
         private const val MIME_TYPE = "application/octet-stream"
         private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
+        private const val KEY_PARAMETER = "key"
         private val GENERATE_KEY_LOCK = Any()
         private val SHA_256_CHARS by lazy { CharArray(64) }
         private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
@@ -109,7 +110,7 @@ class SharedScopeProvider : ContentProvider() {
                             if (session != null && session.method == Method.GET) {
                                 if (session.uri.endsWith(SharedScopeCache.MAGIC_NAME)) {
                                     val key =
-                                        session.parameters[SharedScopeCache.KEY_PARAMETER]?.firstOrNull()
+                                        session.parameters[KEY_PARAMETER]?.firstOrNull()
                                     if (!key.isNullOrEmpty()) {
                                         val file = diskLruCache.get(key)
                                             .getFile(0)
@@ -146,7 +147,7 @@ class SharedScopeProvider : ContentProvider() {
         Log.d(SharedScopeCache.TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
         return Uri.parse("http://localhost:${serverInstance.listeningPort}/${SharedScopeCache.MAGIC_NAME}")
             .buildUpon()
-            .appendQueryParameter(SharedScopeCache.KEY_PARAMETER, key)
+            .appendQueryParameter(KEY_PARAMETER, key)
             .build()
     }
 

@@ -7,7 +7,6 @@ import android.net.Uri
 object SharedScopeCache {
 
     internal const val MAGIC_NAME = "shared-scope-cache"
-    internal const val KEY_PARAMETER = "key"
     internal const val DATA_PARAMETER = "data"
     internal const val TAG = "SharedScopeCache"
 
