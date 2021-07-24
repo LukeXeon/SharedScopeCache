@@ -111,8 +111,8 @@ class SharedScopeCache(context: Context) {
                 writeBytes(data)
             }
             commit()
-            Log.d(TAG, "append:" + getFile(0).absoluteFile)
         }
+        Log.d(TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
         return Uri.parse("http://localhost:${cacheService.listeningPort}/${MAGIC_NAME}")
             .buildUpon()
             .appendQueryParameter(KEY_PARAMETER, key)
