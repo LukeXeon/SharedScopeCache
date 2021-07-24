@@ -452,7 +452,7 @@ public abstract class NanoHTTPD {
         }
 
         @Override
-        public TempFile createTempFile(String filename_hint) throws Exception {
+        public TempFile createTempFile(String filename) throws Exception {
             DefaultTempFile tempFile = new DefaultTempFile(this.tmpdir);
             this.tempFiles.add(tempFile);
             return tempFile;
@@ -1808,7 +1808,7 @@ public abstract class NanoHTTPD {
 
         void clear();
 
-        public TempFile createTempFile(String filename_hint) throws Exception;
+        public TempFile createTempFile(String filename) throws Exception;
     }
 
     /**

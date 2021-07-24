@@ -2,6 +2,8 @@ package open.source.sharedscopecache
 
 import android.content.Context
 import android.net.Uri
+import android.os.Handler
+import android.os.HandlerThread
 import android.util.Log
 import open.source.sharedscopecache.disk.DiskLruCache
 import open.source.sharedscopecache.http.NanoHTTPD
@@ -14,17 +16,18 @@ class SharedScopeCache(context: Context) {
     companion object {
         private const val MAGIC_NAME = "shared_scope_cache"
         private const val KEY_PARAMETER = "key"
+        private const val TAG = "SharedScopeCache"
         private const val MIME_TYPE = ""
         private const val APP_VERSION = 1
         private const val VALUE_COUNT = 1
         private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
         private val GENERATE_KEY_LOCK = Any()
         private val INSTANCE_LOCK = Any()
-        private val SHA_256_CHARS = CharArray(64)
-        private val MESSAGE_DIGEST = MessageDigest.getInstance("SHA-256")
-        private val HEX_CHAR_ARRAY = "0123456789abcdef".toCharArray()
+        private val SHA_256_CHARS by lazy { CharArray(64) }
+        private val MESSAGE_DIGEST by lazy { MessageDigest.getInstance("SHA-256") }
+        private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
+        private val ASYNC_THREAD by lazy { HandlerThread(MAGIC_NAME).apply { start() } }
         private var instance: SharedScopeCache? = null
-        private const val TAG = "SharedScopeCache"
 
         // Taken from:
         // http://stackoverflow.com/questions/9655181/convert-from-byte-array-to-hex-string-in-java
@@ -68,27 +71,7 @@ class SharedScopeCache(context: Context) {
             VALUE_COUNT,
             DEFAULT_MAX_SIZE
         )
-        cacheService = object : NanoHTTPD(0) {
-            override fun serve(session: IHTTPSession?): Response {
-                if (session != null && session.method == Method.GET) {
-                    if (session.uri.endsWith(MAGIC_NAME)) {
-                        val key = session.parameters[KEY_PARAMETER]?.firstOrNull()
-                        if (!key.isNullOrEmpty()) {
-                            val file = diskLruCache.get(key)
-                                .getFile(0)
-                            Log.d(TAG, "response:" + file.absoluteFile)
-                            return newFixedLengthResponse(
-                                Response.Status.OK,
-                                MIME_TYPE,
-                                FileInputStream(file),
-                                file.length()
-                            )
-                        }
-                    }
-                }
-                return super.serve(session)
-            }
-        }
+        cacheService = CacheService(diskLruCache)
         cacheService.start()
     }
 
@@ -106,6 +89,46 @@ class SharedScopeCache(context: Context) {
             .appendQueryParameter(KEY_PARAMETER, key)
             .build()
             .toString()
+    }
+
+    private class CacheService(private val diskLruCache: DiskLruCache) : NanoHTTPD(0) {
+        init {
+            setAsyncRunner(HandlerRunner())
+        }
+
+        override fun serve(session: IHTTPSession?): Response {
+            if (session != null && session.method == Method.GET) {
+                if (session.uri.endsWith(MAGIC_NAME)) {
+                    val key = session.parameters[KEY_PARAMETER]?.firstOrNull()
+                    if (!key.isNullOrEmpty()) {
+                        val file = diskLruCache.get(key)
+                            .getFile(0)
+                        Log.d(TAG, "response:" + file.absoluteFile)
+                        return newFixedLengthResponse(
+                            Response.Status.OK,
+                            MIME_TYPE,
+                            FileInputStream(file),
+                            file.length()
+                        )
+                    }
+                }
+            }
+            return super.serve(session)
+        }
+    }
+
+    private class HandlerRunner : Handler(ASYNC_THREAD.looper), NanoHTTPD.AsyncRunner {
+        override fun closeAll() {
+            removeCallbacksAndMessages(null)
+        }
+
+        override fun closed(clientHandler: NanoHTTPD.ClientHandler) {
+            removeCallbacks(clientHandler)
+        }
+
+        override fun exec(code: NanoHTTPD.ClientHandler) {
+            post(code)
+        }
     }
 
 }
