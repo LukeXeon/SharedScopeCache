@@ -17,7 +17,7 @@ class SharedScopeCache(context: Context) {
         private const val MAGIC_NAME = "shared_scope_cache"
         private const val KEY_PARAMETER = "key"
         private const val TAG = "SharedScopeCache"
-        private const val MIME_TYPE = ""
+        private const val MIME_TYPE = "application/octet-stream"
         private const val APP_VERSION = 1
         private const val VALUE_COUNT = 1
         private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
