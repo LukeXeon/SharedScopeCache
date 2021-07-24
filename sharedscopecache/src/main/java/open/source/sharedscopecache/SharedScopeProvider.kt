@@ -46,12 +46,12 @@ class SharedScopeProvider : ContentProvider() {
 
     private val diskLruCache by lazy {
         DiskLruCache.open(
-            File(
-                System.getProperty(
-                    "java.io.tmpdir",
-                    "."
-                ) ?: "."
-            ),
+            context?.cacheDir ?: File(
+                    System.getProperty(
+                        "java.io.tmpdir",
+                        "."
+                    ) ?: "."
+                ),
             APP_VERSION,
             VALUE_COUNT,
             DEFAULT_MAX_SIZE
