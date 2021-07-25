@@ -92,27 +92,8 @@ class SharedScopeProvider : ContentProvider() {
     private val serverLock = Any()
     private var server: NanoHTTPD? = null
 
-    override fun onCreate(): Boolean {
-        return true
-    }
-
-    override fun query(
-        uri: Uri,
-        projection: Array<out String>?,
-        selection: String?,
-        selectionArgs: Array<out String>?,
-        sortOrder: String?
-    ): Cursor? {
-        return null
-    }
-
-    override fun getType(uri: Uri): String? {
-        return null
-    }
-
-    override fun insert(uri: Uri, values: ContentValues?): Uri? {
-        val data = values?.getAsByteArray(SharedScopeCache.DATA_PARAMETER) ?: return null
-        val serverInstance = synchronized(serverLock) {
+    private fun tryGetServer(): NanoHTTPD? {
+        synchronized(serverLock) {
             var newInstance = server
             if (newInstance == null) {
                 try {
@@ -146,8 +127,31 @@ class SharedScopeProvider : ContentProvider() {
                 }
             }
             server = newInstance
-            return@synchronized newInstance
-        } ?: return null
+            return newInstance
+        }
+    }
+
+    override fun onCreate(): Boolean {
+        return true
+    }
+
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?
+    ): Cursor? {
+        return null
+    }
+
+    override fun getType(uri: Uri): String? {
+        return null
+    }
+
+    override fun insert(uri: Uri, values: ContentValues?): Uri? {
+        val data = values?.getAsByteArray(SharedScopeCache.DATA_PARAMETER) ?: return null
+        val server = tryGetServer() ?: return null
         val key = generateKey(data)
         diskLruCache.edit(key).apply {
             getFile(0).apply {
@@ -156,7 +160,7 @@ class SharedScopeProvider : ContentProvider() {
             commit()
         }
         Log.d(SharedScopeCache.TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
-        return Uri.parse("http://localhost:${serverInstance.listeningPort}/${SharedScopeCache.MAGIC_NAME}")
+        return Uri.parse("http://localhost:${server.listeningPort}/${SharedScopeCache.MAGIC_NAME}")
             .buildUpon()
             .appendQueryParameter(KEY_PARAMETER, key)
             .build()
