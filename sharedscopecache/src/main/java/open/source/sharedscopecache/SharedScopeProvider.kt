@@ -14,7 +14,6 @@ import open.source.sharedscopecache.http.NanoHTTPD
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
-import kotlin.properties.Delegates
 
 
 class SharedScopeProvider : ContentProvider() {
@@ -67,13 +66,36 @@ class SharedScopeProvider : ContentProvider() {
         }
     }
 
+    private inner class CacheServer : NanoHTTPD(0) {
+        override fun serve(session: IHTTPSession?): Response {
+            if (session != null && session.method == Method.GET) {
+                if (session.uri.endsWith(SharedScopeCache.MAGIC_NAME)) {
+                    val key = session.parameters[KEY_PARAMETER]?.firstOrNull()
+                    if (!key.isNullOrEmpty()) {
+                        val file = diskLruCache.get(key)
+                            .getFile(0)
+                        Log.d(SharedScopeCache.TAG, "response:" + file.absoluteFile)
+                        return newFixedLengthResponse(
+                            Response.Status.OK,
+                            MIME_TYPE,
+                            FileInputStream(file),
+                            file.length()
+                        )
+                    }
+                }
+            }
+            return super.serve(session)
+        }
+    }
+
     private val diskLruCache by lazy {
         val maxSize = context?.run {
             packageManager.getProviderInfo(
                 ComponentName(
                     this,
                     SharedScopeProvider::class.java
-                ), PackageManager.GET_META_DATA
+                ),
+                PackageManager.GET_META_DATA
             )
         }?.metaData?.getLong(MAX_SIZE_KEY, DEFAULT_MAX_SIZE) ?: DEFAULT_MAX_SIZE
         val dir = context?.cacheDir ?: File(
@@ -94,31 +116,10 @@ class SharedScopeProvider : ContentProvider() {
 
     private fun tryGetServer(): NanoHTTPD? {
         synchronized(serverLock) {
-            var newInstance = server
-            if (newInstance == null) {
+            var instance = server
+            if (instance == null) {
                 try {
-                    newInstance = object : NanoHTTPD(0) {
-                        override fun serve(session: IHTTPSession?): Response {
-                            if (session != null && session.method == Method.GET) {
-                                if (session.uri.endsWith(SharedScopeCache.MAGIC_NAME)) {
-                                    val key =
-                                        session.parameters[KEY_PARAMETER]?.firstOrNull()
-                                    if (!key.isNullOrEmpty()) {
-                                        val file = diskLruCache.get(key)
-                                            .getFile(0)
-                                        Log.d(SharedScopeCache.TAG, "response:" + file.absoluteFile)
-                                        return newFixedLengthResponse(
-                                            Response.Status.OK,
-                                            MIME_TYPE,
-                                            FileInputStream(file),
-                                            file.length()
-                                        )
-                                    }
-                                }
-                            }
-                            return super.serve(session)
-                        }
-                    }.apply {
+                    instance = CacheServer().apply {
                         setAsyncRunner(HandlerRunner())
                         start()
                     }
@@ -126,8 +127,8 @@ class SharedScopeProvider : ContentProvider() {
                     Log.d(SharedScopeCache.TAG, e.toString())
                 }
             }
-            server = newInstance
-            return newInstance
+            server = instance
+            return instance
         }
     }
 
