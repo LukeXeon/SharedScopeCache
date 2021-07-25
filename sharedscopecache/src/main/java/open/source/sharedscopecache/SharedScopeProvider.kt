@@ -14,6 +14,7 @@ import open.source.sharedscopecache.http.NanoHTTPD
 import java.io.File
 import java.io.FileInputStream
 import java.security.MessageDigest
+import kotlin.properties.Delegates
 
 
 class SharedScopeProvider : ContentProvider() {
@@ -29,7 +30,7 @@ class SharedScopeProvider : ContentProvider() {
         private val SHA_256_CHARS by lazy { CharArray(64) }
         private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
         private val MESSAGE_DIGEST by lazy { MessageDigest.getInstance("SHA-256") }
-        private val ASYNC_THREAD by lazy { HandlerThread(SharedScopeCache.TAG).apply { start() } }
+        private val ASYNC_THREAD by lazy { HandlerThread(SharedScopeCache.MAGIC_NAME).apply { start() } }
 
         // Taken from:
         // http://stackoverflow.com/questions/9655181/convert-from-byte-array-to-hex-string-in-java
@@ -39,8 +40,7 @@ class SharedScopeProvider : ContentProvider() {
             for (j in bytes.indices) {
                 v = bytes[j].toInt() and 0xFF
                 SHA_256_CHARS[j * 2] = HEX_CHAR_ARRAY[v ushr 4]
-                SHA_256_CHARS[j * 2 + 1] =
-                    HEX_CHAR_ARRAY[v and 0x0F]
+                SHA_256_CHARS[j * 2 + 1] = HEX_CHAR_ARRAY[v and 0x0F]
             }
             return String(SHA_256_CHARS)
         }
