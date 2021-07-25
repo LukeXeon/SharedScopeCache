@@ -20,14 +20,15 @@ class MainActivity : AppCompatActivity() {
             val stream = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream)
             Log.d(TAG, "size1=" + stream.size())
-            val uri = SharedScopeCache.append(application, stream.toByteArray())
+            val uri = SharedScopeCache.append(application, stream.toByteArray()) ?: return@thread
             Log.d(TAG, uri.toString())
             runOnUiThread {
                 startActivityForResult(
                     Intent(
                         Intent.ACTION_VIEW
                     ).apply {
-                        putExtra("url", uri.toString())
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        data = uri
                         component = ComponentName(
                             "open.source.sharedscopecache.test",
                             "open.source.sharedscopecache.test.MainActivity"

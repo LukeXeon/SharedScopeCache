@@ -1,24 +1,154 @@
 package open.source.sharedscopecache
 
+import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
+import android.content.Intent
+import android.database.Cursor
+import android.database.MatrixCursor
 import android.net.Uri
+import android.util.Log
+import open.source.sharedscopecache.disk.DiskLruCache
+import java.io.File
+import java.security.MessageDigest
 
-object SharedScopeCache {
 
-    internal const val MAGIC_NAME = "shared-scope-cache"
-    internal const val DATA_PARAMETER = "data"
-    internal const val TAG = "SharedScopeCache"
+class SharedScopeCache : ContentProvider() {
 
-    @JvmStatic
-    fun append(context: Context, bytes: ByteArray): Uri? {
-        val application = context.applicationContext
-        return application.contentResolver
-            .insert(
-                Uri.parse("content://${application.packageName}.${MAGIC_NAME}"),
-                ContentValues().apply {
-                    put(DATA_PARAMETER, bytes)
+    companion object {
+        private const val MAGIC_NAME = "shared-scope-cache"
+        private const val DATA_PARAMETER = "data"
+        private const val TAG = "SharedScopeCache"
+        private const val APP_VERSION = 1
+        private const val VALUE_COUNT = 1
+        private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
+        private const val KEY_PARAMETER = "key"
+        private val COLUMN_NAMES = arrayOf(DATA_PARAMETER)
+        private val GENERATE_KEY_LOCK = Any()
+        private val SHA_256_CHARS by lazy { CharArray(64) }
+        private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
+        private val MESSAGE_DIGEST by lazy { MessageDigest.getInstance("SHA-256") }
+
+        // Taken from:
+        // http://stackoverflow.com/questions/9655181/convert-from-byte-array-to-hex-string-in-java
+        // /9655275#9655275
+        private fun sha256BytesToHex(bytes: ByteArray): String {
+            var v: Int
+            for (j in bytes.indices) {
+                v = bytes[j].toInt() and 0xFF
+                SHA_256_CHARS[j * 2] = HEX_CHAR_ARRAY[v ushr 4]
+                SHA_256_CHARS[j * 2 + 1] = HEX_CHAR_ARRAY[v and 0x0F]
+            }
+            return String(SHA_256_CHARS)
+        }
+
+        private fun generateKey(bytes: ByteArray): String {
+            synchronized(GENERATE_KEY_LOCK) {
+                return sha256BytesToHex(MESSAGE_DIGEST.digest(bytes))
+            }
+        }
+
+        @JvmStatic
+        fun load(context: Context, uri: Uri): ByteArray? {
+            if (uri.authority?.endsWith(MAGIC_NAME) == true) {
+                val application = context.applicationContext
+                val cursor = application.contentResolver.query(
+                    uri,
+                    null,
+                    null,
+                    null,
+                    null
+                )
+                if (cursor != null && cursor.count > 0) {
+                    cursor.moveToFirst()
+                    var bytes: ByteArray? = null
+                    if (!cursor.isNull(0)) {
+                        bytes = cursor.getBlob(0)
+                    }
+                    cursor.close()
+                    return bytes
                 }
-            )
+            }
+            return null
+        }
+
+        @JvmStatic
+        fun append(context: Context, bytes: ByteArray): Uri? {
+            val application = context.applicationContext
+            return application.contentResolver
+                .insert(
+                    Uri.parse("content://${application.packageName}.${MAGIC_NAME}"),
+                    ContentValues().apply {
+                        put(DATA_PARAMETER, bytes)
+                    }
+                )
+        }
+    }
+
+    private val diskLruCache by lazy {
+        DiskLruCache.open(
+            context?.cacheDir ?: File(
+                System.getProperty(
+                    "java.io.tmpdir",
+                    "."
+                ) ?: "."
+            ),
+            APP_VERSION,
+            VALUE_COUNT,
+            DEFAULT_MAX_SIZE
+        )
+    }
+
+    override fun onCreate(): Boolean {
+        return true
+    }
+
+    override fun query(
+        uri: Uri,
+        projection: Array<out String>?,
+        selection: String?,
+        selectionArgs: Array<out String>?,
+        sortOrder: String?
+    ): Cursor? {
+        val key = uri.getQueryParameter(KEY_PARAMETER) ?: return null
+        val entry = diskLruCache.get(key) ?: return null
+        val bytes = entry.getFile(0).readBytes()
+        return MatrixCursor(COLUMN_NAMES, 1).apply {
+            addRow(arrayOf(bytes))
+        }
+    }
+
+    override fun getType(uri: Uri): String? {
+        return null
+    }
+
+    override fun insert(uri: Uri, values: ContentValues?): Uri? {
+        val context = context ?: return null
+        val data = values?.getAsByteArray(DATA_PARAMETER) ?: return null
+        val key = generateKey(data)
+        diskLruCache.edit(key).apply {
+            getFile(0).apply {
+                writeBytes(data)
+            }
+            commit()
+        }
+        Log.d(TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
+        return Uri.parse("content://${context.packageName}.${MAGIC_NAME}")
+            .buildUpon()
+            .appendQueryParameter(KEY_PARAMETER, key)
+            .build()
+    }
+
+    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
+        return 0
+    }
+
+    override fun update(
+        uri: Uri,
+        values: ContentValues?,
+        selection: String?,
+        selectionArgs: Array<out String>?
+    ): Int {
+        return 0
     }
 }
