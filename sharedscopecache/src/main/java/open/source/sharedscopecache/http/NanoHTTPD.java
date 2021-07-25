@@ -80,6 +80,7 @@ import java.util.Map.Entry;
 import java.util.Properties;
 import java.util.StringTokenizer;
 import java.util.TimeZone;
+import java.util.concurrent.FutureTask;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -1747,23 +1748,23 @@ public abstract class NanoHTTPD {
 
         private final int timeout;
 
-        private IOException bindException;
-
-        private boolean hasBinded = false;
+        private final FutureTask<IOException> bindTask;
 
         public ServerRunnable(int timeout) {
             this.timeout = timeout;
+            this.bindTask = new FutureTask<>(() -> {
+                try {
+                    myServerSocket.bind(hostname != null ? new InetSocketAddress(hostname, myPort) : new InetSocketAddress(myPort));
+                    return null;
+                } catch (IOException e) {
+                    return e;
+                }
+            });
         }
 
         @Override
         public void run() {
-            try {
-                myServerSocket.bind(hostname != null ? new InetSocketAddress(hostname, myPort) : new InetSocketAddress(myPort));
-                hasBinded = true;
-            } catch (IOException e) {
-                this.bindException = e;
-                return;
-            }
+            this.bindTask.run();
             do {
                 try {
                     final Socket finalAccept = NanoHTTPD.this.myServerSocket.accept();
@@ -2323,17 +2324,14 @@ public abstract class NanoHTTPD {
         this.myThread.setDaemon(daemon);
         this.myThread.setName("NanoHttpd Main Listener");
         this.myThread.start();
-        while (!serverRunnable.hasBinded && serverRunnable.bindException == null) {
-            try {
-                Thread.sleep(10L);
-            } catch (Throwable e) {
-                // on android this may not be allowed, that's why we
-                // catch throwable the wait should be very short because we are
-                // just waiting for the bind of the socket
-            }
+        IOException bindException = null;
+        try {
+            bindException = serverRunnable.bindTask.get();
+        } catch (Throwable e) {
+            //  waiting for the bind of the socket
         }
-        if (serverRunnable.bindException != null) {
-            throw serverRunnable.bindException;
+        if (bindException != null) {
+            throw bindException;
         }
     }
 
