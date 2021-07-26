@@ -16,7 +16,7 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             val bytes = SharedScopeCache.load(application, uri)
             if (bytes != null) {
-                Glide.with(this).load(bytes)
+                Glide.with(this).load(bytes.values.single())
                     .diskCacheStrategy(DiskCacheStrategy.NONE)
                     .skipMemoryCache(true)
                     .into(view)
