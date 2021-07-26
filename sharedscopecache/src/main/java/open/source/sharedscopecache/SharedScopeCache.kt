@@ -122,10 +122,14 @@ class SharedScopeCache : ContentProvider() {
         if (!keys.isNullOrEmpty()) {
             val cursor = MatrixCursor(COLUMN_NAMES, keys.size)
             for (key in keys) {
-                val entry = diskLruCache.get(key)
-                if (entry != null) {
-                    val bytes = entry.getFile(0).readBytes()
-                    cursor.addRow(arrayOf<Any>(key, bytes))
+                try {
+                    val entry = diskLruCache.get(key)
+                    if (entry != null) {
+                        val bytes = entry.getFile(0).readBytes()
+                        cursor.addRow(arrayOf<Any>(key, bytes))
+                    }
+                } catch (e: Throwable) {
+                    Log.d(TAG, "error:$e")
                 }
             }
             return cursor
@@ -141,17 +145,22 @@ class SharedScopeCache : ContentProvider() {
         val context = context ?: return null
         val data = values?.getAsByteArray(DATA_PARAMETER) ?: return null
         val key = generateKey(data)
-        diskLruCache.edit(key).apply {
-            getFile(0).apply {
-                writeBytes(data)
+        try {
+            diskLruCache.edit(key).apply {
+                getFile(0).apply {
+                    writeBytes(data)
+                }
+                commit()
             }
-            commit()
+            Log.d(TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
+            return Uri.parse("content://${context.packageName}.${MAGIC_NAME}")
+                    .buildUpon()
+                    .appendQueryParameter(KEY_PARAMETER, key)
+                    .build()
+        } catch (e: Throwable) {
+            Log.d(TAG, "error:$e")
+            return null
         }
-        Log.d(TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
-        return Uri.parse("content://${context.packageName}.${MAGIC_NAME}")
-                .buildUpon()
-                .appendQueryParameter(KEY_PARAMETER, key)
-                .build()
     }
 
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
