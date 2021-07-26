@@ -125,7 +125,7 @@ class SharedScopeCache : ContentProvider() {
                 val entry = diskLruCache.get(key)
                 if (entry != null) {
                     val bytes = entry.getFile(0).readBytes()
-                    cursor.addRow(arrayOf(key, bytes))
+                    cursor.addRow(arrayOf<Any>(key, bytes))
                 }
             }
             return cursor
