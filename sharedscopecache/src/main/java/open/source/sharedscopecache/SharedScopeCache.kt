@@ -3,7 +3,6 @@ package open.source.sharedscopecache
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
 import android.database.Cursor
 import android.database.MatrixCursor
 import android.net.Uri
@@ -23,7 +22,7 @@ class SharedScopeCache : ContentProvider() {
         private const val VALUE_COUNT = 1
         private const val DEFAULT_MAX_SIZE: Long = 10 * 1024 * 1024
         private const val KEY_PARAMETER = "key"
-        private val COLUMN_NAMES = arrayOf(DATA_PARAMETER)
+        private val COLUMN_NAMES = arrayOf(KEY_PARAMETER, DATA_PARAMETER)
         private val GENERATE_KEY_LOCK = Any()
         private val SHA_256_CHARS by lazy { CharArray(64) }
         private val HEX_CHAR_ARRAY by lazy { "0123456789abcdef".toCharArray() }
@@ -49,24 +48,33 @@ class SharedScopeCache : ContentProvider() {
         }
 
         @JvmStatic
-        fun load(context: Context, uri: Uri): ByteArray? {
+        fun load(context: Context, uri: Uri): Map<String, ByteArray>? {
             if (uri.authority?.endsWith(MAGIC_NAME) == true) {
                 val application = context.applicationContext
                 val cursor = application.contentResolver.query(
-                    uri,
-                    null,
-                    null,
-                    null,
-                    null
+                        uri,
+                        null,
+                        null,
+                        null,
+                        null
                 )
                 if (cursor != null && cursor.count > 0) {
-                    cursor.moveToFirst()
-                    var bytes: ByteArray? = null
-                    if (!cursor.isNull(0)) {
-                        bytes = cursor.getBlob(0)
+                    val map = HashMap<String, ByteArray>(cursor.count)
+                    while (cursor.moveToNext()) {
+                        var bytes: ByteArray? = null
+                        var key: String? = null
+                        if (!cursor.isNull(0)) {
+                            key = cursor.getString(0)
+                        }
+                        if (!cursor.isNull(1)) {
+                            bytes = cursor.getBlob(1)
+                        }
+                        if (!key.isNullOrEmpty() && bytes != null && bytes.isNotEmpty()) {
+                            map[key] = bytes
+                        }
                     }
                     cursor.close()
-                    return bytes
+                    return map
                 }
             }
             return null
@@ -76,26 +84,26 @@ class SharedScopeCache : ContentProvider() {
         fun append(context: Context, bytes: ByteArray): Uri? {
             val application = context.applicationContext
             return application.contentResolver
-                .insert(
-                    Uri.parse("content://${application.packageName}.${MAGIC_NAME}"),
-                    ContentValues().apply {
-                        put(DATA_PARAMETER, bytes)
-                    }
-                )
+                    .insert(
+                            Uri.parse("content://${application.packageName}.${MAGIC_NAME}"),
+                            ContentValues().apply {
+                                put(DATA_PARAMETER, bytes)
+                            }
+                    )
         }
     }
 
     private val diskLruCache by lazy {
         DiskLruCache.open(
-            context?.cacheDir ?: File(
-                System.getProperty(
-                    "java.io.tmpdir",
-                    "."
-                ) ?: "."
-            ),
-            APP_VERSION,
-            VALUE_COUNT,
-            DEFAULT_MAX_SIZE
+                context?.cacheDir ?: File(
+                        System.getProperty(
+                                "java.io.tmpdir",
+                                "."
+                        ) ?: "."
+                ),
+                APP_VERSION,
+                VALUE_COUNT,
+                DEFAULT_MAX_SIZE
         )
     }
 
@@ -104,18 +112,25 @@ class SharedScopeCache : ContentProvider() {
     }
 
     override fun query(
-        uri: Uri,
-        projection: Array<out String>?,
-        selection: String?,
-        selectionArgs: Array<out String>?,
-        sortOrder: String?
+            uri: Uri,
+            projection: Array<out String>?,
+            selection: String?,
+            selectionArgs: Array<out String>?,
+            sortOrder: String?
     ): Cursor? {
-        val key = uri.getQueryParameter(KEY_PARAMETER) ?: return null
-        val entry = diskLruCache.get(key) ?: return null
-        val bytes = entry.getFile(0).readBytes()
-        return MatrixCursor(COLUMN_NAMES, 1).apply {
-            addRow(arrayOf(bytes))
+        val keys = uri.getQueryParameters(KEY_PARAMETER)
+        if (!keys.isNullOrEmpty()) {
+            val cursor = MatrixCursor(COLUMN_NAMES, keys.size)
+            for (key in keys) {
+                val entry = diskLruCache.get(key)
+                if (entry != null) {
+                    val bytes = entry.getFile(0).readBytes()
+                    cursor.addRow(arrayOf(key, bytes))
+                }
+            }
+            return cursor
         }
+        return null
     }
 
     override fun getType(uri: Uri): String? {
@@ -134,9 +149,9 @@ class SharedScopeCache : ContentProvider() {
         }
         Log.d(TAG, "append:" + diskLruCache.get(key).getFile(0).absoluteFile)
         return Uri.parse("content://${context.packageName}.${MAGIC_NAME}")
-            .buildUpon()
-            .appendQueryParameter(KEY_PARAMETER, key)
-            .build()
+                .buildUpon()
+                .appendQueryParameter(KEY_PARAMETER, key)
+                .build()
     }
 
     override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int {
@@ -144,10 +159,10 @@ class SharedScopeCache : ContentProvider() {
     }
 
     override fun update(
-        uri: Uri,
-        values: ContentValues?,
-        selection: String?,
-        selectionArgs: Array<out String>?
+            uri: Uri,
+            values: ContentValues?,
+            selection: String?,
+            selectionArgs: Array<out String>?
     ): Int {
         return 0
     }

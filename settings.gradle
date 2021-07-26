@@ -1,9 +1,3 @@
-dependencyResolutionManagement {
-    repositories {
-        google()
-        jcenter()
-    }
-}
 rootProject.name = "SharedScopeCache"
 include ':sample'
 include ':sharedscopecache'
